@@ -64,6 +64,7 @@ pub enum ShellType {
     Fish,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct StatusOutput {
     pub killswitch_active: bool,
@@ -72,6 +73,7 @@ pub struct StatusOutput {
     pub daemon_running: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct CommandOutput {
     pub success: bool,
