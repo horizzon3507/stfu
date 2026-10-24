@@ -1,8 +1,10 @@
 install:
 	cargo install --path .
-	stfu install-extension
 
 build:
 	cargo build --release
 
-.PHONY: install build
+test:
+	cargo test
+
+.PHONY: install build test

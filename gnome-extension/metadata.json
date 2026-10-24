@@ -1,7 +1,0 @@
-{
-  "uuid": "stfu@firefly",
-  "name": "STFU",
-  "description": "Microphone kill switch — toggles all mics via the stfu CLI",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
-  "version": 1
-}
