@@ -1,0 +1,19 @@
+pkgbase = stfu
+	pkgdesc = Kill switch for all microphones (PipeWire/WirePlumber)
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://github.com/fireflylabss/stfu
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	depends = gcc-libs
+	depends = wireplumber
+	depends = systemd
+	provides = stfu
+	conflicts = stfu-bin
+	conflicts = stfu-git
+	source = stfu-0.2.0.tar.gz::https://github.com/fireflylabss/stfu/archive/refs/tags/v0.2.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = stfu
