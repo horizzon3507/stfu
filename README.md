@@ -27,7 +27,7 @@ yay -S stfu
 ### From Source (Cargo)
 
 ```bash
-git clone https://github.com/fireflylabss/stfu.git
+git clone https://github.com/horizzon3507/stfu.git
 cd stfu
 cargo install --path .
 ```

@@ -1,20 +1,19 @@
-# Maintainer: Gabriel <contact@fireflylabss.dev>
-# Contributor: Firefly Labs <contact@fireflylabss.dev>
-# Upstream: https://github.com/fireflylabss/stfu
+# Maintainer: horizzon3507 <148660626+horizzon3507@users.noreply.github.com>
+# Upstream: https://github.com/horizzon3507/stfu
 
 pkgname=stfu
 pkgver=0.2.0
 pkgrel=1
 pkgdesc="Kill switch for all microphones (PipeWire/WirePlumber)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/fireflylabss/stfu"
+url="https://github.com/horizzon3507/stfu"
 license=('MIT')
 depends=('gcc-libs' 'wireplumber' 'systemd')
 makedepends=('cargo')
 provides=('stfu')
 conflicts=('stfu-bin' 'stfu-git')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/fireflylabss/stfu/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('SKIP')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/horizzon3507/stfu/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('064b55dea1e2d18387f453f67f195a94e56cb4790b123dacd0190b4805fde4b0')
 
 prepare() {
   cd "${pkgname}-${pkgver}"

@@ -103,7 +103,7 @@ jobs:
         id: sync
         env:
           GH_TOKEN: ${{ github.token }}
-          UPSTREAM_REPO: fireflylabss/stfu
+          UPSTREAM_REPO: horizzon3507/stfu
           FORCE_UPDATE: ${{ inputs.force_publish || 'false' }}
         run: |
           chmod +x scripts/update-aur.sh

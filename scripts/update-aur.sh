@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPSTREAM_REPO="${UPSTREAM_REPO:-fireflylabss/stfu}"
+UPSTREAM_REPO="${UPSTREAM_REPO:-horizzon3507/stfu}"
 AUR_DIR="${ROOT}/packaging/aur"
 cd "$AUR_DIR"
 
