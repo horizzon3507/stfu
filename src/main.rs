@@ -1,127 +1,186 @@
-use clap::{Parser, Subcommand};
+mod audio;
+mod cli;
+mod config;
+mod daemon;
+mod error;
+
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use std::fs;
-use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::io;
+use std::process::ExitCode;
 
-const CONF_NAME: &str = "50-disable-mics.conf";
+use cli::{Cli, Cmd, CommandOutput, ShellType, StatusOutput};
+use error::StfuResult;
 
-const DROPIN: &str = r#"# STFU: disables all ALSA capture nodes (PipeWire/WirePlumber)
-monitor.alsa.rules = [
-  {
-    matches = [
-      {
-        node.name = "~alsa_input.*"
-      }
-    ]
-    actions = {
-      update-props = {
-        node.disabled = true
-      }
-    }
-  }
-]
-"#;
+fn run() -> StfuResult<bool> {
+    let cli = Cli::parse();
+    let conf_path = config::conf_file()?;
+    let dir = config::dropin_dir()?;
 
-#[derive(Parser)]
-#[command(name = "stfu", version, about = "Kill switch for all microphones (PipeWire/WirePlumber)")]
-struct Cli {
-    #[command(subcommand)]
-    cmd: Cmd,
-}
+    match cli.cmd {
+        Cmd::On { no_restart } => {
+            if conf_path.exists() {
+                if let Err(e) = fs::remove_file(&conf_path) {
+                    if e.kind() != io::ErrorKind::NotFound {
+                        return Err(error::StfuError::Io {
+                            path: conf_path.display().to_string(),
+                            source: e,
+                        });
+                    }
+                }
+            }
+            let _ = config::clean_stale_files(&dir);
 
-#[derive(Subcommand)]
-enum Cmd {
-    /// Enable all microphones
-    On {
-        /// Don't restart wireplumber (applies on next restart)
-        #[arg(long)]
-        no_restart: bool,
-    },
-    /// Disable all microphones (STFU engaged)
-    Off {
-        /// Don't restart wireplumber (applies on next restart)
-        #[arg(long)]
-        no_restart: bool,
-    },
-    /// Toggle microphone state, prints the new state
-    Toggle {
-        /// Don't restart wireplumber (applies on next restart)
-        #[arg(long)]
-        no_restart: bool,
-    },
-    /// Print current mic state: "on" or "off"
-    Status,
-}
+            if !no_restart {
+                daemon::restart_wireplumber()?;
+            }
 
-fn dropin_dir() -> PathBuf {
-    let cfg = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").expect("HOME not set")).join(".config"));
-    cfg.join("wireplumber").join("wireplumber.conf.d")
-}
-
-fn conf_file() -> PathBuf {
-    dropin_dir().join(CONF_NAME)
-}
-
-fn disabled_file() -> PathBuf {
-    dropin_dir().join(format!("{CONF_NAME}.disabled"))
-}
-
-/// mics are "off" (muted) when the drop-in is active
-fn mics_off() -> bool {
-    conf_file().exists()
-}
-
-fn state_str() -> &'static str {
-    if mics_off() { "off" } else { "on" }
-}
-
-fn restart_wireplumber() -> Result<(), String> {
-    let status = Command::new("systemctl")
-        .args(["--user", "restart", "wireplumber"])
-        .status()
-        .map_err(|e| format!("failed to run systemctl: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("systemctl exited with {status}"))
-    }
-}
-
-fn set_mics(on: bool, no_restart: bool) -> Result<(), String> {
-    fs::create_dir_all(dropin_dir()).map_err(|e| format!("mkdir failed: {e}"))?;
-    let _ = fs::remove_file(disabled_file()); // clean up stale toggle state
-    if on {
-        match fs::remove_file(conf_file()) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("failed to remove {}: {e}", conf_file().display())),
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&CommandOutput {
+                        success: true,
+                        state: "on".into(),
+                        message: "Microphones enabled".into(),
+                    })?
+                );
+            } else if !cli.quiet {
+                println!("on");
+            }
         }
-    } else {
-        fs::write(conf_file(), DROPIN).map_err(|e| format!("failed to write {}: {e}", conf_file().display()))?;
+        Cmd::Off { no_restart } => {
+            config::write_dropin_atomic(&dir, config::CONF_NAME, config::DROPIN_CONTENT)?;
+            let _ = config::clean_stale_files(&dir);
+
+            if !no_restart {
+                daemon::restart_wireplumber()?;
+            }
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&CommandOutput {
+                        success: true,
+                        state: "off".into(),
+                        message: "Microphones disabled (STFU engaged)".into(),
+                    })?
+                );
+            } else if !cli.quiet {
+                println!("off");
+            }
+        }
+        Cmd::Toggle { no_restart } => {
+            let active = config::is_killswitch_active()?;
+            let new_state = if active {
+                // Currently muted -> enable
+                if conf_path.exists() {
+                    let _ = fs::remove_file(&conf_path);
+                }
+                "on"
+            } else {
+                // Currently unmuted -> disable
+                config::write_dropin_atomic(&dir, config::CONF_NAME, config::DROPIN_CONTENT)?;
+                "off"
+            };
+
+            let _ = config::clean_stale_files(&dir);
+
+            if !no_restart {
+                daemon::restart_wireplumber()?;
+            }
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&CommandOutput {
+                        success: true,
+                        state: new_state.into(),
+                        message: format!("Microphones toggled to {new_state}"),
+                    })?
+                );
+            } else if !cli.quiet {
+                println!("{new_state}");
+            }
+        }
+        Cmd::Status => {
+            let active = config::is_killswitch_active()?;
+            let state = if active { "off" } else { "on" };
+            let daemon_running = daemon::is_wireplumber_active();
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&StatusOutput {
+                        killswitch_active: active,
+                        state: state.into(),
+                        config_path: conf_path.display().to_string(),
+                        daemon_running,
+                    })?
+                );
+            } else if !cli.quiet {
+                println!("{state}");
+            }
+        }
+        Cmd::Restart => {
+            daemon::restart_wireplumber()?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&CommandOutput {
+                        success: true,
+                        state: if config::is_killswitch_active()? { "off".into() } else { "on".into() },
+                        message: "WirePlumber daemon restarted".into(),
+                    })?
+                );
+            } else if !cli.quiet {
+                println!("WirePlumber restarted successfully");
+            }
+        }
+        Cmd::List => {
+            let sources = audio::list_audio_sources()?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&sources)?);
+            } else if !cli.quiet {
+                if sources.is_empty() {
+                    println!("No active audio capture sources found (or microphones killed).");
+                } else {
+                    println!("Detected audio capture sources:");
+                    for s in sources {
+                        let active_marker = if s.active { "*" } else { " " };
+                        println!(" {} [{}] #{} - {} ({})", active_marker, s.source_type, s.id, s.description, s.name);
+                    }
+                }
+            }
+        }
+        Cmd::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = "stfu";
+            match shell {
+                ShellType::Bash => generate(Shell::Bash, &mut cmd, bin_name, &mut io::stdout()),
+                ShellType::Zsh => generate(Shell::Zsh, &mut cmd, bin_name, &mut io::stdout()),
+                ShellType::Fish => generate(Shell::Fish, &mut cmd, bin_name, &mut io::stdout()),
+            }
+        }
+        Cmd::Manpage => {
+            let cmd = Cli::command();
+            let man = clap_mangen::Man::new(cmd);
+            man.render(&mut io::stdout())
+                .map_err(|e| error::StfuError::Io {
+                    path: "stdout".into(),
+                    source: e,
+                })?;
+        }
     }
-    if !no_restart {
-        restart_wireplumber()?;
-    }
-    Ok(())
+
+    Ok(true)
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let result = match cli.cmd {
-        Cmd::On { no_restart } => set_mics(true, no_restart).map(|()| println!("{}", state_str())),
-        Cmd::Off { no_restart } => set_mics(false, no_restart).map(|()| println!("{}", state_str())),
-        Cmd::Toggle { no_restart } => {
-            let target = mics_off(); // mics off -> turn on
-            set_mics(target, no_restart).map(|()| println!("{}", state_str()))
-        }
-        Cmd::Status => Ok(println!("{}", state_str())),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
+    match run() {
+        Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("stfu: {e}");
+            eprintln!("stfu error: {e}");
             ExitCode::FAILURE
         }
     }
