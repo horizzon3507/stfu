@@ -1,0 +1,174 @@
+name: Release & AUR Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: "Force publish to AUR even if version matched"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Binary (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            use_cross: false
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
+            use_cross: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (if needed)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE_NAME="stfu-${VERSION}-${{ matrix.arch }}-linux"
+          mkdir -p "dist/${ARCHIVE_NAME}"
+          cp "target/${{ matrix.target }}/release/stfu" "dist/${ARCHIVE_NAME}/"
+          cp README.md "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp CHANGELOG.md "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+
+          cd dist
+          tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          sha256sum "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: dist/*
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+
+  publish-aur:
+    name: Sync & Publish to AUR
+    needs: create-github-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update PKGBUILD version and checksum
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: fireflylabss/stfu
+          FORCE_UPDATE: ${{ inputs.force_publish || 'false' }}
+        run: |
+          chmod +x scripts/update-aur.sh
+          scripts/update-aur.sh
+
+      - name: Regenerate .SRCINFO using Arch container
+        run: |
+          docker run --rm \
+            -v "$PWD/packaging/aur:/pkg" \
+            -w /pkg \
+            archlinux:latest bash -lc '
+              pacman -Sy --noconfirm base-devel >/dev/null
+              HOST_UID=$(id -u)
+              HOST_GID=$(id -g)
+              groupadd -g "$HOST_GID" builder
+              useradd -u "$HOST_UID" -g "$HOST_GID" -m builder
+              chown "$HOST_UID:$HOST_GID" /pkg
+              su builder -c "makepkg --printsrcinfo > /pkg/.SRCINFO"
+            '
+
+      - name: Commit packaging changes back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(aur): bump to ${{ steps.sync.outputs.version }}"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Publish to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
+          AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
+        run: |
+          if [[ -z "${AUR_SSH_PRIVATE_KEY:-}" ]]; then
+            echo "::warning::AUR_SSH_PRIVATE_KEY secret is not set. Skipping AUR git push."
+            exit 0
+          fi
+
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+
+          git clone "ssh://aur@aur.archlinux.org/stfu.git" /tmp/aur-stfu
+          rsync -a --delete \
+            --exclude '.git' \
+            packaging/aur/ /tmp/aur-stfu/
+
+          cd /tmp/aur-stfu
+          version="$(sed -n 's/^pkgver=//p' PKGBUILD | head -n1)"
+          git config user.name "${AUR_GIT_NAME:-fireflylabss}"
+          git config user.email "${AUR_GIT_EMAIL:-contact@fireflylabss.dev}"
+          git add -A .
+          if git diff --cached --quiet; then
+            echo "AUR tree already up to date."
+            exit 0
+          fi
+          if git rev-parse --verify HEAD >/dev/null 2>&1; then
+            git commit -m "upgpkg: stfu ${version}"
+          else
+            git commit -m "Initial import: stfu ${version}"
+          fi
+          git push origin master
