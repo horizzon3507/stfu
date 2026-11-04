@@ -131,7 +131,7 @@ jobs:
           git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
           if ! git diff --cached --quiet; then
             git commit -m "chore(aur): bump to ${{ steps.sync.outputs.version }}"
-            git push origin HEAD:${{ github.ref_name }}
+            git push origin HEAD:main
           fi
 
       - name: Publish to AUR
