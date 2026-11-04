@@ -17,6 +17,14 @@ Each release heading is the version and date (`## v0.2.0 · 24/10/2026`); under 
 
 </details>
 
+## v0.2.1 · 04/11/2026
+
+Relicense from MIT to Apache 2.0 across the codebase and packaging. This version was made for the CLI on 04/11/2026 (v0.2.1).
+
+- Replaced `LICENSE` with the Apache License 2.0 text.
+- Updated `license` metadata in `Cargo.toml`, the README license section, and the AUR `PKGBUILD`.
+- v0.2.0 and earlier remain available under MIT; v0.2.1 onward ships under Apache 2.0.
+
 ## v0.2.0 · 24/10/2026
 
 Complete CLI overhaul, atomic safety improvements, broader audio device support, AUR packaging, and removal of the GNOME extension. This version was made for the CLI on 24/10/2026 (v0.2.0).
