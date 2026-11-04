@@ -115,12 +115,10 @@ jobs:
             -v "$PWD/packaging/aur:/pkg" \
             -w /pkg \
             archlinux:latest bash -lc '
+              set -e
               pacman -Sy --noconfirm base-devel >/dev/null
-              HOST_UID=$(id -u)
-              HOST_GID=$(id -g)
-              groupadd -g "$HOST_GID" builder
-              useradd -u "$HOST_UID" -g "$HOST_GID" -m builder
-              chown "$HOST_UID:$HOST_GID" /pkg
+              useradd -m builder
+              chown builder:builder /pkg
               su builder -c "makepkg --printsrcinfo > /pkg/.SRCINFO"
             '
 
