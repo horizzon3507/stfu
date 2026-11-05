@@ -116,10 +116,11 @@ jobs:
             -w /pkg \
             archlinux:latest bash -lc '
               set -e
+              pacman-key --init
               pacman -Sy --noconfirm archlinux-keyring
               pacman -S --noconfirm --needed base-devel >/dev/null
               useradd -m builder
-              chown builder:builder /pkg
+              chown -R builder:builder /pkg
               su builder -c "makepkg --printsrcinfo > /pkg/.SRCINFO"
             '
 
