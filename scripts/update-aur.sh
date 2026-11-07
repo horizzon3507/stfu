@@ -66,13 +66,11 @@ while i < len(lines):
     elif line.startswith("pkgrel="):
         out.append("pkgrel=1\n")
     elif line.startswith("sha256sums=("):
-        out.append(line)
-        i += 1
-        while i < len(lines) and not lines[i].strip().startswith(")"):
+        out.append(f"sha256sums=('{source_sha}')\n")
+        if not line.rstrip().endswith(")"):
             i += 1
-        out.append(f"  '{source_sha}'\n")
-        if i < len(lines):
-            out.append(lines[i])
+            while i < len(lines) and not lines[i].strip().startswith(")"):
+                i += 1
     else:
         out.append(line)
     i += 1
